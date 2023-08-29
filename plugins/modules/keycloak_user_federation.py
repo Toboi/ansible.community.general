@@ -718,6 +718,15 @@ def sanitize(comp):
                 mapper['config'] = dict((k, v[0]) for k, v in mapper['config'].items())
     return compcopy
 
+def get_federation_config(kc, cid, realm):
+    federation_config = kc.get_component(cid, realm)
+    if federation_config is None:
+        federation_config = {}
+    else:
+        # if user federation exists, get associated mappers
+        federation_config['mappers'] = sorted(kc.get_components(urlencode(dict(parent=cid)), realm), key=lambda x: x.get('name'))
+    return federation_config
+
 
 def main():
     """
@@ -952,10 +961,12 @@ def main():
                     new_mapper['parentId'] = after_comp['id']
                 mapper = kc.create_component(new_mapper, realm)
 
-        after_comp['mappers'] = updated_mappers
-        result['end_state'] = sanitize(after_comp)
+        end_state = get_federation_config(kc, cid, realm)
+        result['end_state'] = sanitize(end_state)
+        if module._diff:
+            result['diff'] = dict(before='', after=sanitize(end_state))
 
-        result['msg'] = "User federation {id} has been created".format(id=after_comp['id'])
+        result['msg'] = "User federation {id} has been created".format(id=cid)
         module.exit_json(**result)
 
     else:
@@ -982,7 +993,6 @@ def main():
             desired_comp = desired_comp.copy()
             updated_mappers = desired_comp.pop('mappers', [])
             kc.update_component(desired_comp, realm)
-            after_comp = kc.get_component(cid, realm)
 
             for mapper in updated_mappers:
                 if mapper.get('id') is not None:
@@ -992,10 +1002,19 @@ def main():
                         mapper['parentId'] = desired_comp['id']
                     mapper = kc.create_component(mapper, realm)
 
-            after_comp['mappers'] = updated_mappers
-            result['end_state'] = sanitize(after_comp)
+            end_state = get_federation_config(kc, cid, realm)
+            result['end_state'] = sanitize(end_state)
 
-            result['msg'] = "User federation {id} has been updated".format(id=cid)
+            if module._diff:
+                result['diff'] = dict(before=sanitize(before_comp), after=sanitize(end_state))
+
+            if end_state == before_comp:
+                result['changed'] = False
+                result['msg'] = "User federation {id} was not changed".format(id=cid)
+            else:
+                result['changed'] = True
+                result['msg'] = "User federation {id} has been updated".format(id=cid)
+
             module.exit_json(**result)
 
         elif state == 'absent':
